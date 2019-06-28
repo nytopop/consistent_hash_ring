@@ -148,8 +148,8 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
         digest.finish()
     }
 
-    fn insert_node(&mut self, replica: (usize, T)) {
-        self.ring.ord_insert(self.hash(&replica), replica.1);
+    fn insert_node(&mut self, replica: usize, node: T) {
+        self.ring.ord_insert(self.hash((replica, &node)), node);
     }
 
     /// Insert a node into the ring with the default replica count.
@@ -157,15 +157,12 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
         self.insert_weight(node, self.replicas)
     }
 
-    /// Insert a node into the ring with a variable amount of replicas.
+    /// Insert a node into the ring with the provided number of replicas.
     ///
     /// This can be used give some nodes more weight than others - nodes
-    /// with higher replica counts will tend to be selected for larger
-    /// proportions of keys.
+    /// with more replicas will be selected for larger proportions of keys.
     pub fn insert_weight(&mut self, node: &T, replicas: usize) {
-        (0..replicas)
-            .map(|idx| (idx, node.clone()))
-            .for_each(|replica| self.insert_node(replica));
+        (0..replicas).for_each(|idx| self.insert_node(idx, node.clone()));
     }
 
     /// Remove a node from the ring.
