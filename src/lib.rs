@@ -80,7 +80,7 @@ impl Hasher for DigestIEEE {
     }
 
     fn finish(&self) -> u64 {
-        self.0 as u64
+        u64::from(self.0)
     }
 }
 
