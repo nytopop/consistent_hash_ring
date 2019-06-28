@@ -116,7 +116,7 @@ impl<T: Hash + Eq + Clone> Ring<T> {
         I: Iterator<Item = T>,
     {
         let mut ring = Ring::new(replicas);
-        nodes.for_each(|node| ring.insert(&node));
+        ring.insert_iter(nodes);
         ring
     }
 }
@@ -138,7 +138,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
         I: Iterator<Item = T>,
     {
         let mut ring = Ring::new_with_hasher(replicas, hash);
-        nodes.for_each(|node| ring.insert(&node));
+        ring.insert_iter(nodes);
         ring
     }
 
@@ -152,6 +152,11 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
         self.ring.ord_insert(self.hash((replica, &node)), node);
     }
 
+    /// Insert nodes from an iterator.
+    pub fn insert_iter<I: Iterator<Item = T>>(&mut self, nodes: I) {
+        nodes.for_each(|node| self.insert(&node))
+    }
+
     /// Insert a node into the ring with the default replica count.
     pub fn insert(&mut self, node: &T) {
         self.insert_weight(node, self.replicas)
@@ -162,12 +167,15 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// This can be used give some nodes more weight than others - nodes
     /// with more replicas will be selected for larger proportions of keys.
     pub fn insert_weight(&mut self, node: &T, replicas: usize) {
-        (0..replicas).for_each(|idx| self.insert_node(idx, node.clone()));
+        (0..replicas).for_each(|idx| self.insert_node(idx, node.clone()))
     }
 
     /// Remove a node from the ring.
+    ///
+    /// Any keys that were mapped to this node will be uniformly distributed
+    /// amongst any remaining nodes.
     pub fn remove(&mut self, node: &T) {
-        self.ring.retain(|(_, _node)| node != _node);
+        self.ring.retain(|(_, _node)| node != _node)
     }
 
     /// Hash the provided key and return a reference to the node responsible
