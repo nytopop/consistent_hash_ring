@@ -22,7 +22,10 @@
 
 extern crate crc;
 
-use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
+use std::{
+    collections::HashSet,
+    hash::{BuildHasher, BuildHasherDefault, Hash, Hasher},
+};
 
 type VecMap<K, V> = Vec<(K, V)>;
 
@@ -96,7 +99,7 @@ pub struct Ring<T: Hash + Eq + Clone, S = IEEE> {
 
 impl<T: Hash + Eq + Clone> Default for Ring<T> {
     fn default() -> Self {
-        Self::new(1)
+        Self::new(10)
     }
 }
 
@@ -142,22 +145,75 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
         ring
     }
 
-    fn hash<K: Hash>(&self, key: K) -> u64 {
-        let mut digest = self.hash.build_hasher();
-        key.hash(&mut digest);
-        digest.finish()
+    /// Returns the number of nodes in the ring (not including any replicas).
+    ///
+    /// ```
+    /// use consistent_hash_ring::Ring;
+    ///
+    /// let ring = Ring::new_with_nodes(10, 0..32);
+    /// assert_eq!(32, ring.len());
+    /// ```
+    pub fn len(&self) -> usize {
+        self.ring.iter().map(second).collect::<HashSet<_>>().len()
     }
 
-    fn insert_node(&mut self, replica: usize, node: T) {
-        self.ring.ord_insert(self.hash((replica, &node)), node);
+    /// Returns the number of replicas of the provided node, or 0 if it does
+    /// not exist.
+    ///
+    /// ```
+    /// use consistent_hash_ring::Ring;
+    ///
+    /// let mut ring = Ring::new_with_nodes(12, 0..4);
+    /// ring.insert_weight(&42, 9);
+    /// assert_eq!(12, ring.weight(&3));
+    /// assert_eq!(9, ring.weight(&42));
+    /// ```
+    pub fn weight(&self, node: &T) -> usize {
+        self.ring.iter().filter(|(_, _node)| _node == node).count()
     }
 
     /// Insert nodes from an iterator.
+    ///
+    /// ```
+    /// use consistent_hash_ring::Ring;
+    ///
+    /// let mut ring = Ring::new(10);
+    /// assert_eq!(0, ring.len());
+    /// ring.insert_iter(0..14);
+    /// assert_eq!(14, ring.len());
+    /// ```
     pub fn insert_iter<I: Iterator<Item = T>>(&mut self, nodes: I) {
         nodes.for_each(|node| self.insert(&node))
     }
 
+    /// Insert weighted nodes from an iterator.
+    ///
+    /// ```
+    /// use consistent_hash_ring::Ring;
+    ///
+    /// let mut ring = Ring::new(10);
+    /// assert_eq!(0, ring.len());
+    /// ring.insert_weight_iter((0..12).map(|x| (x, 4)));
+    /// assert_eq!(12, ring.len());
+    /// assert_eq!(4, ring.weight(&7));
+    /// ```
+    pub fn insert_weight_iter<I>(&mut self, nodes: I)
+    where
+        I: Iterator<Item = (T, usize)>,
+    {
+        nodes.for_each(|(node, replicas)| self.insert_weight(&node, replicas))
+    }
+
     /// Insert a node into the ring with the default replica count.
+    ///
+    /// ```
+    /// use consistent_hash_ring::Ring;
+    ///
+    /// let mut ring = Ring::new(3);
+    /// ring.insert(b"hello worldo");
+    /// assert_eq!(1, ring.len());
+    /// assert_eq!(3, ring.weight(b"hello worldo"));
+    /// ```
     pub fn insert(&mut self, node: &T) {
         self.insert_weight(node, self.replicas)
     }
@@ -166,14 +222,49 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     ///
     /// This can be used give some nodes more weight than others - nodes
     /// with more replicas will be selected for larger proportions of keys.
+    ///
+    /// If the provided node is already present in the ring with a lower
+    /// replica count, the count is updated. If the existing count is higher,
+    /// this method does nothing.
+    /// ```
+    /// use consistent_hash_ring::Ring;
+    ///
+    /// let mut ring = Ring::new(3);
+    /// ring.insert(b"hello worldo");
+    /// ring.insert_weight(b"worldo hello", 9);
+    /// assert_eq!(2, ring.len());
+    /// assert_eq!(3, ring.weight(b"hello worldo"));
+    /// assert_eq!(9, ring.weight(b"worldo hello"));
+    /// ```
     pub fn insert_weight(&mut self, node: &T, replicas: usize) {
         (0..replicas).for_each(|idx| self.insert_node(idx, node.clone()))
+    }
+
+    fn insert_node(&mut self, replica: usize, node: T) {
+        self.ring.ord_insert(self.hash((replica, &node)), node);
+    }
+
+    fn hash<K: Hash>(&self, key: K) -> u64 {
+        let mut digest = self.hash.build_hasher();
+        key.hash(&mut digest);
+        digest.finish()
     }
 
     /// Remove a node from the ring.
     ///
     /// Any keys that were mapped to this node will be uniformly distributed
     /// amongst any remaining nodes.
+    ///
+    /// ```
+    /// use consistent_hash_ring::Ring;
+    ///
+    /// let mut ring = Ring::new_with_nodes(10, 0..12);
+    /// assert_eq!(12, ring.len());
+    /// assert_eq!(10, ring.weight(&3));
+    /// ring.remove(&3);
+    /// assert_eq!(11, ring.len());
+    /// assert_eq!(0, ring.weight(&3));
+    /// ```
     pub fn remove(&mut self, node: &T) {
         self.ring.retain(|(_, _node)| node != _node)
     }
@@ -184,6 +275,16 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// Any key type may be used so long as it is Hash.
     ///
     /// Returns None if there are no nodes in the ring.
+    ///
+    /// ```
+    /// use consistent_hash_ring::Ring;
+    ///
+    /// let mut ring = Ring::new(12);
+    /// assert_eq!(None, ring.try_get(b"none"));
+    ///
+    /// ring.insert(b"hello worldo");
+    /// assert_eq!(Some(b"hello worldo"), ring.try_get(42));
+    /// ```
     pub fn try_get<K: Hash>(&self, key: K) -> Option<&T> {
         self.ring.find_gte(&self.hash(key))
     }
@@ -194,6 +295,14 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// Any key type may be used so long as it is Hash.
     ///
     /// Panics if there are no nodes in the ring.
+    /// ```
+    /// use consistent_hash_ring::Ring;
+    ///
+    /// let mut ring = Ring::new_with_nodes(12, 0..3);
+    /// assert_eq!(&1, ring.get("ok"));
+    /// assert_eq!(&0, ring.get("or"));
+    /// assert_eq!(&2, ring.get("another"));
+    /// ```
     pub fn get<K: Hash>(&self, key: K) -> &T {
         self.try_get(key).unwrap()
     }
