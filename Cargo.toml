@@ -1,0 +1,14 @@
+[package]
+name = "consistent_hash_ring"
+version = "0.1.0"
+authors = ["nytopop <ericizoita@gmail.com>"]
+edition = "2018"
+license = "MIT"
+description = "A flexible and efficient consistent hash ring"
+homepage = "https://github.com/nytopop/consistent_hash_ring"
+repository = "https://github.com/nytopop/consistent_hash_ring"
+documentation = "https://docs.rs/consistent_hash_ring"
+keywords = ["ring", "consistent", "hash", "distributed", "cache"]
+
+[dependencies]
+crc = "1.8.1"
