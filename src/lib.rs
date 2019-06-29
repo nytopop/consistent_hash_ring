@@ -256,7 +256,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// Remove a node from the ring.
     ///
     /// Any keys that were mapped to this node will be uniformly distributed
-    /// amongst any remaining nodes.
+    /// amongst nearby nodes.
     ///
     /// ```
     /// use consistent_hash_ring::*;
