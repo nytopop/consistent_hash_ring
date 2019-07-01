@@ -23,7 +23,7 @@
 extern crate fnv;
 
 pub mod collections;
-use collections::{Map, Set};
+use collections::{first, Map, Set};
 
 use fnv::FnvBuildHasher;
 use std::{
@@ -31,6 +31,7 @@ use std::{
     hash::{BuildHasher, Hash, Hasher},
 };
 
+/// A builder for `Ring`.
 pub struct RingBuilder<T, S = FnvBuildHasher>
 where
     T: Hash + Eq + Clone,
@@ -50,6 +51,7 @@ impl<T: Hash + Eq + Clone> Default for RingBuilder<T> {
 }
 
 impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
+    /// Returns a new `RingBuilder` with the specified `BuildHasher`.
     pub fn new(hasher: S) -> Self {
         RingBuilder {
             hasher,
@@ -60,26 +62,38 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
         }
     }
 
+    /// Specifies the number of vnodes for each node.
+    ///
+    /// The default is 10.
     pub fn vnodes(mut self, vnodes: usize) -> Self {
         self.vnodes = Some(vnodes);
         self
     }
 
+    /// Specifies the number of replicas for each key.
+    ///
+    /// The default is 1.
     pub fn replicas(mut self, replicas: usize) -> Self {
         self.replicas = Some(replicas);
         self
     }
 
+    /// Ensure that the built `Ring` contains node with the specified number of
+    /// vnodes (regardless of the default vnode count).
     pub fn weighted_node(mut self, node: T, vnodes: usize) -> Self {
         self.weighted_nodes.push((node, vnodes));
         self
     }
 
+    /// Ensure that the built `Ring` contains all nodes in the provided slice with
+    /// the associated number of vnodes (regardless of the default vnode count).
     pub fn weighted_nodes(mut self, weighted_nodes: &[(T, usize)]) -> Self {
         self.weighted_nodes.extend_from_slice(weighted_nodes);
         self
     }
 
+    /// Ensure that the built `Ring` contains all nodes in the provided iterator with
+    /// the associated number of vnodes (regardless of the default vnode count).
     pub fn weighted_nodes_iter<I>(mut self, weighted_nodes: I) -> Self
     where
         I: Iterator<Item = (T, usize)>,
@@ -88,16 +102,19 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
         self
     }
 
+    /// Ensure that the built `Ring` contains the provided node.
     pub fn node(mut self, node: T) -> Self {
         self.nodes.push(node);
         self
     }
 
+    /// Ensure that the built `Ring` contains all nodes in the provided slice.
     pub fn nodes(mut self, nodes: &[T]) -> Self {
         self.nodes.extend_from_slice(nodes);
         self
     }
 
+    /// Ensure that the built `Ring` contains all nodes in the provided iterator.
     pub fn nodes_iter<I>(mut self, nodes: I) -> Self
     where
         I: Iterator<Item = T>,
@@ -106,34 +123,80 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
         self
     }
 
+    /// Build the `Ring`.
     pub fn build(self) -> Ring<T, S> {
         let vnodes = self.vnodes.unwrap_or(10);
 
         let mut ring = Ring {
-            vnodes,
+            n_vnodes: vnodes,
             replicas: self.replicas.unwrap_or(1),
-            ring: Vec::with_capacity(vnodes * self.nodes.len()),
-            uniq: Vec::with_capacity(self.nodes.len() + self.weighted_nodes.len()),
             hasher: self.hasher,
+            vnodes: Vec::with_capacity(vnodes * self.nodes.len()),
+            unique: Vec::with_capacity(self.nodes.len() + self.weighted_nodes.len()),
         };
 
-        self.nodes.into_iter().for_each(|node| ring.insert(&node));
+        self.nodes.into_iter().for_each(|node| ring.insert(node));
         self.weighted_nodes
             .into_iter()
-            .for_each(|(node, weight)| ring.insert_weight(&node, weight));
+            .for_each(|(node, weight)| ring.insert_weight(node, weight));
 
         ring
     }
 }
 
-/// A consistent hash ring with support for vnodes and key replication.
+/// A consistent hash ring with support for virtual nodes and key replication.
+///
+/// ## How it works
+/// Typical hash ring construction. See
+/// [wikipedia](https://en.wikipedia.org/wiki/Consistent_hashing#Technique).
+///
+/// Nodes are mapped onto locations on a finite ring using a hash function. Keys are
+/// likewise hashed and mapped onto the same ring; the responsible node for a given
+/// key is the first node whose hash is greater than or equal to the key's hash.
+///
+/// ## Virtual Nodes
+/// Because node locations on the ring are only uniformly distributed when looking at
+/// the ring containing all possible nodes, we map each node to multiple vnodes to
+/// improve the statistical properties of key distribution. The probability of a node
+/// being selected for any given key scales linearly with the proportion of assigned
+/// vnodes relative to other nodes in the ring.
+///
+/// ## Replication
+/// Keys may optionally be mapped to a set of disjoint vnodes for fault tolerance or
+/// high availability purposes. Each additional replica is located by hashing keys an
+/// extra round; the hash is then mapped in the same manner as a single key. If any
+/// duplicate nodes arise during replica resolution, a circular scan starting at the
+/// index of the offending vnode is used to select the next vnode.
+///
+/// ## Performance
+/// Mutable and immutable operations on the ring tend toward linear and sublinear
+/// complexity respectively.
+///
+/// The figures given below assume that:
+///
+/// * n = total nodes
+/// * k = total vnodes
+/// * v = vnodes per node
+/// * r = replica count
 #[derive(Clone)]
 pub struct Ring<T: Hash + Eq + Clone, S = FnvBuildHasher> {
-    vnodes: usize,       // default number of vnodes for each node
-    replicas: usize,     // default number of replication candidates for each key
-    ring: Vec<(u64, T)>, // the ring itself, contains all vnodes
-    uniq: Vec<(u64, T)>, // unique nodes for efficient len() implementation
-    hasher: S,           // selected build hasher
+    n_vnodes: usize, // # of vnodes for each node (default)
+    replicas: usize, // # of replication candidates for each key
+    hasher: S,       // selected build hasher
+
+    // kv map for vnodes. used for most queries.
+    //
+    //           |----------- hash(hash(...(hash(node))))
+    //           |     |----- node
+    //           |     |  |-- hash(node)
+    vnodes: Vec<(u64, (T, u64))>,
+
+    // kv map for unique nodes. mainly used for efficient
+    // implementations of len() and weight().
+    //
+    //           |------- hash(node)
+    //           |    |-- n_vnodes
+    unique: Vec<(u64, usize)>,
 }
 
 impl<T: Hash + Eq + Clone> Default for Ring<T> {
@@ -145,6 +208,8 @@ impl<T: Hash + Eq + Clone> Default for Ring<T> {
 impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// Returns the number of nodes in the ring (not including any duplicate vnodes).
     ///
+    /// O(1)
+    ///
     /// ```
     /// use consistent_hash_ring::*;
     ///
@@ -154,10 +219,12 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// assert_eq!(32, ring.len());
     /// ```
     pub fn len(&self) -> usize {
-        self.uniq.len()
+        self.unique.len()
     }
 
     /// Returns whether or not the ring is empty.
+    ///
+    /// O(1)
     ///
     /// ```
     /// use consistent_hash_ring::*;
@@ -168,10 +235,12 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// assert!(!ring.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
-        self.ring.is_empty()
+        self.vnodes.is_empty()
     }
 
     /// Returns the total number of vnodes in the ring, across all nodes.
+    ///
+    /// O(1)
     ///
     /// ```
     /// use consistent_hash_ring::*;
@@ -184,11 +253,13 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// assert_eq!(12, ring.len());
     /// ```
     pub fn vnodes(&self) -> usize {
-        self.ring.len()
+        self.vnodes.len()
     }
 
-    /// Returns the number of vnodes for the provided node, or 0 if it does
+    /// Returns the number of vnodes for the provided node, or `None` if it does
     /// not exist.
+    ///
+    /// O(log n)
     ///
     /// ```
     /// use consistent_hash_ring::*;
@@ -196,17 +267,20 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// let mut ring = RingBuilder::default()
     ///     .vnodes(12)
     ///     .nodes_iter(0..4)
+    ///     .weighted_node(42, 9)
     ///     .build();
-    /// ring.insert_weight(&42, 9);
-    /// assert_eq!(12, ring.weight(&3));
-    /// assert_eq!(9, ring.weight(&42));
-    /// assert_eq!(0, ring.weight(&24));
+    ///
+    /// assert_eq!(Some(12), ring.weight(&3));
+    /// assert_eq!(Some(9), ring.weight(&42));
+    /// assert_eq!(None, ring.weight(&24));
     /// ```
-    pub fn weight(&self, node: &T) -> usize {
-        self.ring.iter().filter(|(_, _node)| _node == node).count()
+    pub fn weight(&self, node: &T) -> Option<usize> {
+        self.unique.map_lookup(&self.hash(node)).map(|w| *w)
     }
 
     /// Insert a node into the ring with the default vnode count.
+    ///
+    /// O(v * k)
     ///
     /// ```
     /// use consistent_hash_ring::*;
@@ -214,20 +288,20 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// let mut ring = Ring::default();
     /// ring.insert(b"hello worldo");
     /// assert_eq!(1, ring.len());
-    /// assert_eq!(10, ring.weight(b"hello worldo"));
+    /// assert_eq!(Some(10), ring.weight(&b"hello worldo"));
     /// ```
-    pub fn insert(&mut self, node: &T) {
-        self.insert_weight(node, self.vnodes)
+    pub fn insert(&mut self, node: T) {
+        self.insert_weight(node, self.n_vnodes)
     }
 
     /// Insert a node into the ring with the provided number of vnodes.
     ///
-    /// This can be used give some nodes more weight than others - nodes
-    /// with more vnodes will be selected for larger proportions of keys.
+    /// This can be used give some nodes more weight than others - nodes with
+    /// more vnodes will be selected for larger proportions of keys.
     ///
-    /// If the provided node is already present in the ring with a lower
-    /// vnode count, the count is updated. If the existing count is higher,
-    /// this method does nothing.
+    /// If the provided node is already present in the ring, the count is updated.
+    ///
+    /// O(v * k)
     ///
     /// ```
     /// use consistent_hash_ring::*;
@@ -236,17 +310,28 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// ring.insert(b"hello worldo");
     /// ring.insert_weight(b"worldo hello", 9);
     /// assert_eq!(2, ring.len());
-    /// assert_eq!(10, ring.weight(b"hello worldo"));
-    /// assert_eq!(9, ring.weight(b"worldo hello"));
+    /// assert_eq!(Some(10), ring.weight(&b"hello worldo"));
+    /// assert_eq!(Some(9), ring.weight(&b"worldo hello"));
     /// ```
-    pub fn insert_weight(&mut self, node: &T, vnodes: usize) {
-        for idx in 0..vnodes as u64 {
-            let hash = self.hash((idx, node));
-            self.ring.map_insert(hash, node.clone());
+    pub fn insert_weight(&mut self, node: T, vnodes: usize) {
+        let node_hash = self.hash(&node);
+
+        let mut hash = node_hash;
+        // insert new vnodes
+        for _ in 0..vnodes {
+            self.vnodes.map_insert(hash, (node.clone(), node_hash));
+            hash = self.hash(hash);
         }
-        self.uniq.map_insert(self.hash(node), node.clone());
+
+        // remove old vnodes (if present)
+        while self.vnodes.map_remove(&hash).is_some() {
+            hash = self.hash(hash);
+        }
+
+        self.unique.map_insert(node_hash, vnodes);
     }
 
+    // Hash the provided key.
     fn hash<K: Hash>(&self, key: K) -> u64 {
         let mut digest = self.hasher.build_hasher();
         key.hash(&mut digest);
@@ -258,6 +343,8 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// Any keys that were mapped to this node will be uniformly distributed
     /// amongst nearby nodes.
     ///
+    /// O(k + n)
+    ///
     /// ```
     /// use consistent_hash_ring::*;
     ///
@@ -265,21 +352,23 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     ///     .nodes_iter(0..12)
     ///     .build();
     /// assert_eq!(12, ring.len());
-    /// assert_eq!(10, ring.weight(&3));
+    /// assert_eq!(Some(10), ring.weight(&3));
     /// ring.remove(&3);
     /// assert_eq!(11, ring.len());
-    /// assert_eq!(0, ring.weight(&3));
+    /// assert_eq!(None, ring.weight(&3));
     /// ```
     pub fn remove(&mut self, node: &T) {
-        self.ring.retain(|(_, _node)| node != _node);
-        self.uniq.map_remove(&self.hash(node));
+        self.vnodes.retain(|(_, (_node, _))| node != _node);
+        self.unique.map_remove(&self.hash(node));
     }
 
     /// Returns a reference to the first node responsible for the provided key.
     ///
     /// Any key type may be used so long as it is Hash.
     ///
-    /// Returns None if there are no nodes in the ring.
+    /// Returns `None` if there are no nodes in the ring.
+    ///
+    /// O(log k)
     ///
     /// ```
     /// use consistent_hash_ring::*;
@@ -287,13 +376,13 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// let mut ring = RingBuilder::default()
     ///     .vnodes(12)
     ///     .build();
-    /// assert_eq!(None, ring.try_first(b"none"));
+    /// assert_eq!(None, ring.try_get(b"none"));
     ///
     /// ring.insert(b"hello worldo");
-    /// assert_eq!(Some(b"hello worldo"), ring.try_first(42));
+    /// assert_eq!(Some(&b"hello worldo"), ring.try_get(42));
     /// ```
-    pub fn try_first<K: Hash>(&self, key: K) -> Option<&T> {
-        self.ring.find_gte(&self.hash(key))
+    pub fn try_get<K: Hash>(&self, key: K) -> Option<&T> {
+        self.vnodes.find_gte(&self.hash(key)).map(first)
     }
 
     /// Returns a reference to the first node responsible for the provided key.
@@ -301,6 +390,8 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// Any key type may be used so long as it is Hash.
     ///
     /// Panics if there are no nodes in the ring.
+    ///
+    /// O(log k)
     ///
     /// ```
     /// use consistent_hash_ring::*;
@@ -310,15 +401,17 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     ///     .nodes_iter(0..1)
     ///     .build();
     ///
-    /// assert_eq!(&0, ring.first("by"));
+    /// assert_eq!(&0, ring.get("by"));
     /// ```
-    pub fn first<K: Hash>(&self, key: K) -> &T {
-        self.try_first(key).unwrap()
+    pub fn get<K: Hash>(&self, key: K) -> &T {
+        self.try_get(key).unwrap()
     }
 
     /// Returns an iterator over replication candidates for the provided key.
     ///
-    /// Prefer `Ring::first` instead if only the first node will be used.
+    /// Prefer `Ring::get` instead if only the first node will be used.
+    ///
+    /// O(r * (k + log k))
     ///
     /// ```
     /// use consistent_hash_ring::*;
@@ -328,33 +421,45 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     ///     .nodes_iter(0..12)
     ///     .build();
     ///
-    /// let expect = vec![&1, &2, &6];
+    /// let expect = vec![&10, &2, &8];
     ///
-    /// assert_eq!(expect, ring.get("key").collect::<Vec<_>>());
-    /// assert_eq!(expect[0], ring.first("key"));
+    /// assert_eq!(expect, ring.replicas("key").collect::<Vec<_>>());
+    /// assert_eq!(expect[0], ring.get("key"));
+    ///
+    /// let ring: Ring<()> = RingBuilder::default()
+    ///     .replicas(3)
+    ///     .build();
+    ///
+    /// assert_eq!(None, ring.replicas("key").next());
     /// ```
-    pub fn get<'a, K: Hash>(&'a self, key: K) -> Candidates<'a, T, S> {
+    pub fn replicas<'a, K: Hash>(&'a self, key: K) -> Candidates<'a, T, S> {
         Candidates {
             limit: cmp::min(self.replicas, self.len()),
-            ring: self,
+            inner: self,
             seen: Vec::with_capacity(self.replicas),
             hash: self.hash(&key),
         }
+    }
+
+    // Get the root hash of the node at the provided vnode index.
+    unsafe fn get_root_hash(&self, vnode_idx: usize) -> u64 {
+        (self.vnodes.get_unchecked(vnode_idx).1).1
+    }
+
+    // Get a reference to the node at the provided vnode index.
+    unsafe fn get_node_ref(&self, vnode_idx: usize) -> &T {
+        &(self.vnodes.get_unchecked(vnode_idx).1).0
     }
 }
 
 /// An iterator over replication candidates.
 ///
-/// Constructed by `Ring::get`.
-pub struct Candidates<'a, T, S = FnvBuildHasher>
-where
-    T: Hash + Eq + Clone,
-    S: BuildHasher,
-{
-    limit: usize,
-    ring: &'a Ring<T, S>,
-    seen: Vec<u64>,
-    hash: u64,
+/// Constructed by `Ring::replicas`.
+pub struct Candidates<'a, T: Hash + Eq + Clone, S = FnvBuildHasher> {
+    limit: usize,          // # of replicas to return
+    inner: &'a Ring<T, S>, // the inner ring
+    seen: Vec<u64>,        // hashes of nodes we've used
+    hash: u64,             // recursive key hash
 }
 
 impl<'a, T: Hash + Eq + Clone, S: BuildHasher> Iterator for Candidates<'a, T, S> {
@@ -365,19 +470,37 @@ impl<'a, T: Hash + Eq + Clone, S: BuildHasher> Iterator for Candidates<'a, T, S>
             return None;
         }
 
-        let node = loop {
-            let node = self.ring.ring.find_gte(&self.hash)?;
-            if self.seen.set_insert(self.ring.hash(node)) {
-                break node;
-            }
-            self.hash = self.ring.hash(self.hash);
+        let checked = |i| match self.inner.vnodes.len() {
+            n if n == 0 => None,
+            n if n == i => Some(0),
+            _ => Some(i),
         };
 
-        if self.seen.len() < self.limit {
-            self.hash = self.ring.hash(self.hash);
+        let mut idx = (self.inner.vnodes)
+            .binary_search_by_key(&&self.hash, first)
+            .map_or_else(checked, Some)?;
+
+        while !self
+            .seen
+            .set_insert(unsafe { self.inner.get_root_hash(idx) })
+        {
+            if idx < self.inner.vnodes.len() {
+                idx += 1;
+            } else {
+                idx = 0;
+            }
         }
 
-        Some(node)
+        if self.seen.len() < self.limit {
+            self.hash = self.inner.hash(self.hash);
+        }
+
+        Some(unsafe { self.inner.get_node_ref(idx) })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.limit - self.seen.len();
+        (n, Some(n))
     }
 }
 
@@ -401,10 +524,10 @@ mod consistent_hash_ring_tests {
                 .nodes_iter(0..16)
                 .build();
 
-            let x = *ring.first("hello_worldo");
+            let x = *ring.get("hello_worldo");
             ring.remove(&x);
-            ring.insert(&x);
-            let y = *ring.first("hello_worldo");
+            ring.insert(x);
+            let y = *ring.get("hello_worldo");
 
             assert_eq!(x, y);
         }
@@ -424,16 +547,16 @@ mod consistent_hash_ring_tests {
                 .nodes_iter(vec![1, 2, 0].into_iter())
                 .build();
 
-            assert_eq!(ring1.first(1), ring2.first(1));
-            assert_eq!(ring1.first(2), ring2.first(2));
-            assert_eq!(ring1.first(0), ring2.first(0));
+            assert_eq!(ring1.get(1), ring2.get(1));
+            assert_eq!(ring1.get(2), ring2.get(2));
+            assert_eq!(ring1.get(0), ring2.get(0));
         }
     }
 
     #[test]
-    fn try_first_does_not_panic() {
+    fn try_get_does_not_panic() {
         let ring: Ring<usize> = Ring::default();
-        assert_eq!(None, ring.try_first("helloworldo"));
+        assert_eq!(None, ring.try_get("helloworldo"));
     }
 
     #[test]
@@ -447,7 +570,7 @@ mod consistent_hash_ring_tests {
                 .build();
 
             let table = (0..64)
-                .map(|x| (x, *ring.first(x)))
+                .map(|x| (x, *ring.get(x)))
                 .collect::<HashMap<_, _>>();
 
             const REMOVED: usize = 2;
@@ -457,7 +580,7 @@ mod consistent_hash_ring_tests {
                 let s = table[&x];
 
                 if s != REMOVED {
-                    assert_eq!(s, *ring.first(x));
+                    assert_eq!(s, *ring.get(x));
                 }
             }
         }
@@ -476,12 +599,12 @@ mod consistent_hash_ring_tests {
 
             const A: usize = 42;
             const B: usize = 24;
-            a_ring.insert(&A);
-            b_ring.insert(&B);
+            a_ring.insert(A);
+            b_ring.insert(B);
 
             for x in 0..32 {
-                let a = *a_ring.first(x);
-                let b = *b_ring.first(x);
+                let a = *a_ring.get(x);
+                let b = *b_ring.get(x);
 
                 if a != A && b != B {
                     assert_eq!(a, b);
@@ -490,73 +613,73 @@ mod consistent_hash_ring_tests {
         }
     }
 
-    fn bench_get32(b: &mut Bencher, replicas: usize) {
+    fn bench_replicas32(b: &mut Bencher, replicas: usize) {
         let mut ring = RingBuilder::default().vnodes(50).replicas(replicas).build();
 
         let buckets: Vec<String> = (0..32)
             .map(|s| format!("shard-{}", s))
-            .inspect(|b| ring.insert(b))
+            .inspect(|b| ring.insert(b.clone()))
             .collect();
 
         let mut i = 0;
         b.iter(|| {
             i += 1;
-            ring.get(&buckets[i & 31]).for_each(|_| ());
+            ring.replicas(&buckets[i & 31]).for_each(|_| ());
         });
     }
 
     #[bench]
-    fn bench_get32_1(b: &mut Bencher) {
-        bench_get32(b, 1);
+    fn bench_replicas32_1(b: &mut Bencher) {
+        bench_replicas32(b, 1);
     }
 
     #[bench]
-    fn bench_get32_2(b: &mut Bencher) {
-        bench_get32(b, 2);
+    fn bench_replicas32_2(b: &mut Bencher) {
+        bench_replicas32(b, 2);
     }
 
     #[bench]
-    fn bench_get32_4(b: &mut Bencher) {
-        bench_get32(b, 4);
+    fn bench_replicas32_3(b: &mut Bencher) {
+        bench_replicas32(b, 3);
     }
 
     #[bench]
-    fn bench_get32_8(b: &mut Bencher) {
-        bench_get32(b, 8);
+    fn bench_replicas32_4(b: &mut Bencher) {
+        bench_replicas32(b, 4);
     }
 
-    fn bench_first(b: &mut Bencher, shards: usize) {
+    fn bench_get(b: &mut Bencher, shards: usize) {
         let mut ring = RingBuilder::default().vnodes(50).build();
 
         let buckets: Vec<String> = (0..shards)
             .map(|s| format!("shard-{}", s))
-            .inspect(|b| ring.insert(b))
+            .inspect(|b| ring.insert(b.clone()))
             .collect();
 
         let mut i = 0;
         b.iter(|| {
             i += 1;
-            ring.first(&buckets[i & (shards - 1)]);
+            ring.get(&buckets[i & (shards - 1)]);
         });
     }
 
     #[bench]
-    fn bench_first_1_8(b: &mut Bencher) {
-        bench_first(b, 8);
+    fn bench_get_a_8(b: &mut Bencher) {
+        bench_get(b, 8);
     }
 
     #[bench]
-    fn bench_first_2_32(b: &mut Bencher) {
-        bench_first(b, 32);
+    fn bench_get_b_32(b: &mut Bencher) {
+        bench_get(b, 32);
     }
 
     #[bench]
-    fn bench_first_3_128(b: &mut Bencher) {
-        bench_first(b, 128);
+    fn bench_get_c_128(b: &mut Bencher) {
+        bench_get(b, 128);
     }
 
     #[bench]
-    fn bench_first_4_512(b: &mut Bencher) {
-        bench_first(b, 512);
+    fn bench_get_d_512(b: &mut Bencher) {
+        bench_get(b, 512);
     }
 }

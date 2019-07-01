@@ -62,6 +62,11 @@ pub trait Map<K, V> {
     /// Returns `None` if the key doesn't exist.
     fn map_remove(&mut self, key: &K) -> Option<(K, V)>;
 
+    /// Lookup the value at key.
+    ///
+    /// Returns `None` if the key doesn't exist.
+    fn map_lookup(&self, key: &K) -> Option<&V>;
+
     /// Find the smallest key that is greater than or equal to key, wrapping
     /// to zero if there isn't one.
     ///
@@ -112,6 +117,21 @@ impl<K: Ord, V> Map<K, V> for Vec<(K, V)> {
     fn map_remove(&mut self, key: &K) -> Option<(K, V)> {
         self.binary_search_by_key(&key, first)
             .map(|i| self.remove(i))
+            .ok()
+    }
+
+    /// ```
+    /// use consistent_hash_ring::collections::Map;
+    ///
+    /// let mut map = (0..2).map(|x|(x,x)).collect::<Vec<_>>();
+    ///
+    /// assert_eq!(Some(&1), map.map_lookup(&1));
+    /// assert_eq!(None, map.map_lookup(&3));
+    /// ```
+    fn map_lookup(&self, key: &K) -> Option<&V> {
+        self.binary_search_by_key(&key, first)
+            .map(|i| unsafe { self.get_unchecked(i) })
+            .map(second)
             .ok()
     }
 
