@@ -30,6 +30,8 @@ pub trait Set<T> {
 }
 
 impl<T: Ord> Set<T> for Vec<T> {
+    /// O(n + log n)
+    ///
     /// ```
     /// use consistent_hash_ring::collections::Set;
     ///
@@ -85,6 +87,8 @@ pub(crate) fn second<L, R>(tup: &(L, R)) -> &R {
 }
 
 impl<K: Ord, V> Map<K, V> for Vec<(K, V)> {
+    /// O(n + log n)
+    ///
     /// ```
     /// use consistent_hash_ring::collections::Map;
     ///
@@ -106,6 +110,8 @@ impl<K: Ord, V> Map<K, V> for Vec<(K, V)> {
         .ok()
     }
 
+    /// O(n + log n)
+    ///
     /// ```
     /// use consistent_hash_ring::collections::Map;
     ///
@@ -121,6 +127,8 @@ impl<K: Ord, V> Map<K, V> for Vec<(K, V)> {
             .ok()
     }
 
+    /// O(log n)
+    ///
     /// ```
     /// use consistent_hash_ring::collections::Map;
     ///
@@ -136,6 +144,8 @@ impl<K: Ord, V> Map<K, V> for Vec<(K, V)> {
             .ok()
     }
 
+    /// O(log n)
+    ///
     /// ```
     /// use consistent_hash_ring::collections::Map;
     ///

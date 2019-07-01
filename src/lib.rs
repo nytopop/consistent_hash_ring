@@ -280,7 +280,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
 
     /// Insert a node into the ring with the default vnode count.
     ///
-    /// O(v * k)
+    /// O(k * v + (v log k) + log k + n + log n)
     ///
     /// ```
     /// use consistent_hash_ring::*;
@@ -301,7 +301,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     ///
     /// If the provided node is already present in the ring, the count is updated.
     ///
-    /// O(v * k)
+    /// O(k * v + (v log k) + log k + n + log n)
     ///
     /// ```
     /// use consistent_hash_ring::*;
@@ -328,7 +328,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
             hash = self.hash(hash);
         }
 
-        // remove old vnodes (if present)
+        // remove old vnodes (if any are present)
         while self.vnodes.map_remove(&hash).is_some() {
             hash = self.hash(hash);
         }
@@ -348,7 +348,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// Any keys that were mapped to this node will be uniformly distributed
     /// amongst nearby nodes.
     ///
-    /// O(k + n)
+    /// O(k + n + log n)
     ///
     /// ```
     /// use consistent_hash_ring::*;
@@ -416,7 +416,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     ///
     /// Prefer `Ring::get` instead if only the first node will be used.
     ///
-    /// O(r * (k + log k))
+    /// O(r * (r + log r + k + log k))
     ///
     /// ```
     /// use consistent_hash_ring::*;
