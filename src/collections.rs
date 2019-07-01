@@ -78,6 +78,7 @@ pub trait Map<K, V> {
 pub(crate) fn first<L, R>(tup: &(L, R)) -> &L {
     &tup.0
 }
+
 #[inline]
 pub(crate) fn second<L, R>(tup: &(L, R)) -> &R {
     &tup.1

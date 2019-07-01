@@ -318,8 +318,13 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
 
         let mut hash = node_hash;
         // insert new vnodes
-        for _ in 0..vnodes {
+        for _ in 0..vnodes.saturating_sub(1) {
             self.vnodes.map_insert(hash, (node.clone(), node_hash));
+            hash = self.hash(hash);
+        }
+
+        if vnodes > 0 {
+            self.vnodes.map_insert(hash, (node, node_hash));
             hash = self.hash(hash);
         }
 
