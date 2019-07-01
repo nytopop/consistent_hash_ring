@@ -489,7 +489,7 @@ impl<'a, T: Hash + Eq + Clone, S: BuildHasher> Iterator for Candidates<'a, T, S>
             .seen
             .set_insert(unsafe { self.inner.get_root_hash(idx) })
         {
-            if idx < self.inner.vnodes.len() {
+            if idx < self.inner.vnodes.len() - 1 {
                 idx += 1;
             } else {
                 idx = 0;
@@ -514,7 +514,6 @@ mod consistent_hash_ring_tests {
     extern crate test;
 
     use super::*;
-    use std::collections::HashMap;
     use test::Bencher;
 
     const TEST_VNODES: usize = 4;
@@ -565,55 +564,60 @@ mod consistent_hash_ring_tests {
     }
 
     #[test]
-    fn removing_nodes_does_not_redistribute_all_keys() {
+    fn removing_nodes_does_not_redistribute_all_replicas() {
         for vnodes in 1..=TEST_VNODES {
             println!("vnodes: {}", vnodes);
 
             let mut ring = RingBuilder::default()
                 .vnodes(vnodes)
-                .nodes_iter(0..4)
+                .replicas(3)
+                .nodes_iter(0..32)
                 .build();
-
-            let table = (0..64)
-                .map(|x| (x, *ring.get(x)))
-                .collect::<HashMap<_, _>>();
+            let control = ring.clone();
 
             const REMOVED: usize = 2;
             ring.remove(&REMOVED);
 
-            for x in 0..32 {
-                let s = table[&x];
+            for x in 0..64 {
+                let ctl: Vec<_> = control.replicas(x).collect();
+                let real: Vec<_> = ring.replicas(x).collect();
 
-                if s != REMOVED {
-                    assert_eq!(s, *ring.get(x));
+                if !ctl.contains(&&REMOVED) {
+                    assert_eq!(ctl, real);
                 }
+
+                assert_eq!(real[0], ring.get(x));
             }
         }
     }
 
     #[test]
-    fn inserting_nodes_does_not_redistribute_all_keys() {
+    fn inserting_nodes_does_not_redistribute_all_replicas() {
         for vnodes in 1..=TEST_VNODES {
             println!("vnodes: {}", vnodes);
 
-            let mut a_ring = RingBuilder::default()
+            let mut x_ring = RingBuilder::default()
                 .vnodes(vnodes)
+                .replicas(3)
                 .nodes_iter(0..4)
                 .build();
-            let mut b_ring = a_ring.clone();
+            let mut y_ring = x_ring.clone();
 
-            const A: usize = 42;
-            const B: usize = 24;
-            a_ring.insert(A);
-            b_ring.insert(B);
+            const X: usize = 42;
+            const Y: usize = 24;
+            x_ring.insert(X);
+            y_ring.insert(Y);
 
-            for x in 0..32 {
-                let a = *a_ring.get(x);
-                let b = *b_ring.get(x);
+            for v in 0..64 {
+                let xs: Vec<_> = x_ring.replicas(v).collect();
+                let ys: Vec<_> = y_ring.replicas(v).collect();
 
-                if a != A && b != B {
-                    assert_eq!(a, b);
+                if !xs.contains(&&X) && !ys.contains(&&Y) {
+                    assert_eq!(xs, ys);
                 }
+
+                assert_eq!(xs[0], x_ring.get(v));
+                assert_eq!(ys[0], y_ring.get(v));
             }
         }
     }
