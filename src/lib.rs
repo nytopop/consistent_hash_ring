@@ -208,7 +208,7 @@ impl<T: Hash + Eq + Clone> Default for Ring<T> {
     }
 }
 
-impl<K: Hash, T: Hash + Eq + Clone> Index<K> for Ring<T> {
+impl<K: Hash, T: Hash + Eq + Clone, S: BuildHasher> Index<K> for Ring<T, S> {
     type Output = T;
 
     fn index(&self, index: K) -> &Self::Output {
