@@ -29,9 +29,11 @@ use fnv::FnvBuildHasher;
 use std::{
     cmp,
     hash::{BuildHasher, Hash, Hasher},
+    ops::Index,
 };
 
 /// A builder for `Ring`.
+#[derive(Clone)]
 pub struct RingBuilder<T, S = FnvBuildHasher>
 where
     T: Hash + Eq + Clone,
@@ -135,10 +137,11 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
             unique: Vec::with_capacity(self.nodes.len() + self.weighted_nodes.len()),
         };
 
-        self.nodes.into_iter().for_each(|node| ring.insert(node));
-        self.weighted_nodes
+        self.nodes
             .into_iter()
-            .for_each(|(node, weight)| ring.insert_weight(node, weight));
+            .map(|n| (n, vnodes))
+            .chain(self.weighted_nodes)
+            .for_each(|(n, v)| ring.insert_weight(n, v));
 
         ring
     }
@@ -202,6 +205,14 @@ pub struct Ring<T: Hash + Eq + Clone, S = FnvBuildHasher> {
 impl<T: Hash + Eq + Clone> Default for Ring<T> {
     fn default() -> Self {
         RingBuilder::default().build()
+    }
+}
+
+impl<K: Hash, T: Hash + Eq + Clone> Index<K> for Ring<T> {
+    type Output = T;
+
+    fn index(&self, index: K) -> &Self::Output {
+        self.get(index)
     }
 }
 
@@ -301,7 +312,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     ///
     /// If the provided node is already present in the ring, the count is updated.
     ///
-    /// O(k * v + (v log k) + log k + n + log n)
+    /// O(k * v + (v * log k) + log k + n + log n)
     ///
     /// ```
     /// use consistent_hash_ring::*;
@@ -322,7 +333,6 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
             self.vnodes.map_insert(hash, (node.clone(), node_hash));
             hash = self.hash(hash);
         }
-
         if vnodes > 0 {
             self.vnodes.map_insert(hash, (node, node_hash));
             hash = self.hash(hash);
@@ -528,10 +538,10 @@ mod consistent_hash_ring_tests {
                 .nodes_iter(0..16)
                 .build();
 
-            let x = *ring.get("hello_worldo");
+            let x = ring["hello_worldo"];
             ring.remove(&x);
             ring.insert(x);
-            let y = *ring.get("hello_worldo");
+            let y = ring["hello_worldo"];
 
             assert_eq!(x, y);
         }
@@ -551,9 +561,7 @@ mod consistent_hash_ring_tests {
                 .nodes_iter(vec![1, 2, 0].into_iter())
                 .build();
 
-            assert_eq!(ring1.get(1), ring2.get(1));
-            assert_eq!(ring1.get(2), ring2.get(2));
-            assert_eq!(ring1.get(0), ring2.get(0));
+            (0..32).for_each(|i| assert_eq!(ring1[i], ring2[i]));
         }
     }
 
@@ -580,13 +588,14 @@ mod consistent_hash_ring_tests {
 
             for x in 0..64 {
                 let ctl: Vec<_> = control.replicas(x).collect();
+                assert_eq!(*ctl[0], control[x]);
+
                 let real: Vec<_> = ring.replicas(x).collect();
+                assert_eq!(*real[0], ring[x]);
 
                 if !ctl.contains(&&REMOVED) {
                     assert_eq!(ctl, real);
                 }
-
-                assert_eq!(real[0], ring.get(x));
             }
         }
     }
@@ -610,14 +619,14 @@ mod consistent_hash_ring_tests {
 
             for v in 0..64 {
                 let xs: Vec<_> = x_ring.replicas(v).collect();
+                assert_eq!(*xs[0], x_ring[v]);
+
                 let ys: Vec<_> = y_ring.replicas(v).collect();
+                assert_eq!(*ys[0], y_ring[v]);
 
                 if !xs.contains(&&X) && !ys.contains(&&Y) {
                     assert_eq!(xs, ys);
                 }
-
-                assert_eq!(xs[0], x_ring.get(v));
-                assert_eq!(ys[0], y_ring.get(v));
             }
         }
     }
