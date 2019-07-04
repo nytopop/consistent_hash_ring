@@ -69,7 +69,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
     ///
     /// The default is 10.
     pub fn vnodes(mut self, vnodes: usize) -> Self {
-        self.vnodes = Some(vnodes);
+        self.vnodes = Some(cmp::max(1, vnodes));
         self
     }
 
@@ -77,7 +77,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
     ///
     /// The default is 1.
     pub fn replicas(mut self, replicas: usize) -> Self {
-        self.replicas = Some(replicas);
+        self.replicas = Some(cmp::max(1, replicas));
         self
     }
 
