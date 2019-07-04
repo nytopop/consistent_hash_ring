@@ -27,6 +27,7 @@ use collections::{first, Map, Set};
 
 use fnv::FnvBuildHasher;
 use std::{
+    borrow::Borrow,
     cmp,
     hash::{BuildHasher, Hash, Hasher},
     ops::Index,
@@ -372,8 +373,12 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// assert_eq!(11, ring.len());
     /// assert_eq!(None, ring.weight(&3));
     /// ```
-    pub fn remove(&mut self, node: &T) {
-        self.vnodes.retain(|(_, (_node, _))| node != _node);
+    pub fn remove<Q: ?Sized>(&mut self, node: &Q)
+    where
+        T: Borrow<Q>,
+        Q: Hash + Eq,
+    {
+        self.vnodes.retain(|(_, (_node, _))| node != _node.borrow());
         self.unique.map_remove(&self.hash(node));
     }
 
@@ -629,6 +634,17 @@ mod consistent_hash_ring_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn remove_borrow() {
+        let mut ring: Ring<String> = RingBuilder::default().build();
+        ring.insert("localhost".into());
+
+        assert_eq!(1, ring.len());
+
+        ring.remove("localhost");
+        assert_eq!(0, ring.len());
     }
 
     fn bench_replicas32(b: &mut Bencher, replicas: usize) {
