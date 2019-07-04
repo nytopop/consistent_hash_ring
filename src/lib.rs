@@ -286,7 +286,11 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// assert_eq!(Some(9), ring.weight(&42));
     /// assert_eq!(None, ring.weight(&24));
     /// ```
-    pub fn weight(&self, node: &T) -> Option<usize> {
+    pub fn weight<Q: ?Sized>(&self, node: &Q) -> Option<usize>
+    where
+        T: Borrow<Q>,
+        Q: Hash + Eq,
+    {
         self.unique.map_lookup(&self.hash(node)).map(|w| *w)
     }
 
@@ -637,14 +641,20 @@ mod consistent_hash_ring_tests {
     }
 
     #[test]
-    fn remove_borrow() {
-        let mut ring: Ring<String> = RingBuilder::default().build();
-        ring.insert("localhost".into());
+    fn remove_borrowed_node() {
+        let mut ring = RingBuilder::default()
+            .vnodes(10)
+            .node("localhost".to_owned())
+            .build();
 
         assert_eq!(1, ring.len());
+        assert_eq!(10, ring.vnodes());
+        assert_eq!(Some(10), ring.weight("localhost"));
 
         ring.remove("localhost");
         assert_eq!(0, ring.len());
+        assert_eq!(0, ring.vnodes());
+        assert_eq!(None, ring.weight("localhost"));
     }
 
     fn bench_replicas32(b: &mut Bencher, replicas: usize) {
