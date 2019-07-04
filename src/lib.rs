@@ -296,15 +296,15 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
 
     /// Insert a node into the ring with the default vnode count.
     ///
-    /// O(k * v + (v log k) + log k + n + log n)
+    /// O(k * v + (v * log k) + log k + n + log n)
     ///
     /// ```
     /// use consistent_hash_ring::*;
     ///
     /// let mut ring = Ring::default();
-    /// ring.insert(b"hello worldo");
+    /// ring.insert("hello worldo");
     /// assert_eq!(1, ring.len());
-    /// assert_eq!(Some(10), ring.weight(&b"hello worldo"));
+    /// assert_eq!(Some(10), ring.weight("hello worldo"));
     /// ```
     pub fn insert(&mut self, node: T) {
         self.insert_weight(node, self.n_vnodes)
@@ -323,11 +323,11 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// use consistent_hash_ring::*;
     ///
     /// let mut ring = Ring::default();
-    /// ring.insert(b"hello worldo");
-    /// ring.insert_weight(b"worldo hello", 9);
+    /// ring.insert("hello worldo");
+    /// ring.insert_weight("worldo hello", 9);
     /// assert_eq!(2, ring.len());
-    /// assert_eq!(Some(10), ring.weight(&b"hello worldo"));
-    /// assert_eq!(Some(9), ring.weight(&b"worldo hello"));
+    /// assert_eq!(Some(10), ring.weight("hello worldo"));
+    /// assert_eq!(Some(9), ring.weight("worldo hello"));
     /// ```
     pub fn insert_weight(&mut self, node: T, vnodes: usize) {
         let node_hash = self.hash(&node);
@@ -400,10 +400,10 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// let mut ring = RingBuilder::default()
     ///     .vnodes(12)
     ///     .build();
-    /// assert_eq!(None, ring.try_get(b"none"));
+    /// assert_eq!(None, ring.try_get("none"));
     ///
-    /// ring.insert(b"hello worldo");
-    /// assert_eq!(Some(&b"hello worldo"), ring.try_get(42));
+    /// ring.insert("hello worldo");
+    /// assert_eq!(Some(&"hello worldo"), ring.try_get(42));
     /// ```
     pub fn try_get<K: Hash>(&self, key: K) -> Option<&T> {
         self.vnodes.find_gte(&self.hash(key)).map(first)
