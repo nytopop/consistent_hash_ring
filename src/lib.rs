@@ -40,8 +40,8 @@ where
     S: BuildHasher,
 {
     hasher: S,
-    vnodes: Option<usize>,
-    replicas: Option<usize>,
+    vnodes: usize,
+    replicas: usize,
     nodes: Vec<T>,
     weighted_nodes: Vec<(T, usize)>,
 }
@@ -57,8 +57,8 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
     pub fn new(hasher: S) -> Self {
         RingBuilder {
             hasher,
-            vnodes: None,
-            replicas: None,
+            vnodes: 10,
+            replicas: 1,
             nodes: vec![],
             weighted_nodes: vec![],
         }
@@ -68,7 +68,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
     ///
     /// The default is 10.
     pub fn vnodes(mut self, vnodes: usize) -> Self {
-        self.vnodes = Some(cmp::max(1, vnodes));
+        self.vnodes = cmp::max(1, vnodes);
         self
     }
 
@@ -76,7 +76,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
     ///
     /// The default is 1.
     pub fn replicas(mut self, replicas: usize) -> Self {
-        self.replicas = Some(cmp::max(1, replicas));
+        self.replicas = cmp::max(1, replicas);
         self
     }
 
@@ -127,15 +127,15 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
 
     /// Build the `Ring`.
     pub fn build(self) -> Ring<T, S> {
-        let vnodes = self.vnodes.unwrap_or(10);
-
         let mut ring = Ring {
-            n_vnodes: vnodes,
-            replicas: self.replicas.unwrap_or(1),
+            n_vnodes: self.vnodes,
+            replicas: self.replicas,
             hasher: self.hasher,
-            vnodes: Vec::with_capacity(vnodes * self.nodes.len()),
+            vnodes: Vec::with_capacity(self.vnodes * self.nodes.len()),
             unique: Vec::with_capacity(self.nodes.len() + self.weighted_nodes.len()),
         };
+
+        let vnodes = self.vnodes;
 
         self.nodes
             .into_iter()
