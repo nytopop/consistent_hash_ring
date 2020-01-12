@@ -41,7 +41,6 @@ where
 {
     hasher: S,
     vnodes: usize,
-    replicas: usize,
     nodes: Vec<T>,
     weighted_nodes: Vec<(T, usize)>,
 }
@@ -58,7 +57,6 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
         RingBuilder {
             hasher,
             vnodes: 10,
-            replicas: 1,
             nodes: vec![],
             weighted_nodes: vec![],
         }
@@ -69,14 +67,6 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
     /// The default is 10.
     pub fn vnodes(mut self, vnodes: usize) -> Self {
         self.vnodes = cmp::max(1, vnodes);
-        self
-    }
-
-    /// Specifies the number of replicas for each key.
-    ///
-    /// The default is 1.
-    pub fn replicas(mut self, replicas: usize) -> Self {
-        self.replicas = cmp::max(1, replicas);
         self
     }
 
@@ -129,7 +119,6 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
     pub fn build(self) -> Ring<T, S> {
         let mut ring = Ring {
             n_vnodes: self.vnodes,
-            replicas: self.replicas,
             hasher: self.hasher,
             vnodes: Vec::with_capacity(self.vnodes * self.nodes.len()),
             unique: Vec::with_capacity(self.nodes.len() + self.weighted_nodes.len()),
@@ -184,7 +173,6 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
 #[derive(Clone)]
 pub struct Ring<T: Hash + Eq + Clone, S = FnvBuildHasher> {
     n_vnodes: usize, // # of vnodes for each node (default)
-    replicas: usize, // # of replication candidates for each key
     hasher: S,       // selected build hasher
 
     // kv map for vnodes. used for most queries.
@@ -440,26 +428,22 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// use consistent_hash_ring::*;
     ///
     /// let ring = RingBuilder::default()
-    ///     .replicas(3)
     ///     .nodes_iter(0..12)
     ///     .build();
     ///
     /// let expect = vec![&10, &2, &8];
     ///
-    /// assert_eq!(expect, ring.replicas("key").collect::<Vec<_>>());
+    /// assert_eq!(expect, ring.replicas("key").take(3).collect::<Vec<_>>());
     /// assert_eq!(expect[0], ring.get("key"));
     ///
-    /// let ring: Ring<()> = RingBuilder::default()
-    ///     .replicas(3)
-    ///     .build();
+    /// let ring: Ring<()> = RingBuilder::default().build();
     ///
     /// assert_eq!(None, ring.replicas("key").next());
     /// ```
     pub fn replicas<'a, K: Hash>(&'a self, key: K) -> Candidates<'a, T, S> {
         Candidates {
-            limit: cmp::min(self.replicas, self.len()),
             inner: self,
-            seen: Vec::with_capacity(self.replicas),
+            seen: Vec::with_capacity(self.len()),
             hash: self.hash(&key),
         }
     }
@@ -479,7 +463,6 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
 ///
 /// Constructed by `Ring::replicas`.
 pub struct Candidates<'a, T: Hash + Eq + Clone, S = FnvBuildHasher> {
-    limit: usize,          // # of replicas to return
     inner: &'a Ring<T, S>, // the inner ring
     seen: Vec<u64>,        // hashes of nodes we've used
     hash: u64,             // recursive key hash
@@ -489,7 +472,7 @@ impl<'a, T: Hash + Eq + Clone, S: BuildHasher> Iterator for Candidates<'a, T, S>
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.seen.len() >= self.limit {
+        if self.seen.len() >= self.inner.len() {
             return None;
         }
 
@@ -514,7 +497,7 @@ impl<'a, T: Hash + Eq + Clone, S: BuildHasher> Iterator for Candidates<'a, T, S>
             }
         }
 
-        if self.seen.len() < self.limit {
+        if self.seen.len() < self.inner.len() {
             self.hash = self.inner.hash(self.hash);
         }
 
@@ -522,7 +505,7 @@ impl<'a, T: Hash + Eq + Clone, S: BuildHasher> Iterator for Candidates<'a, T, S>
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let n = self.limit - self.seen.len();
+        let n = self.inner.len() - self.seen.len();
         (n, Some(n))
     }
 }
@@ -586,7 +569,6 @@ mod consistent_hash_ring_tests {
 
             let mut ring = RingBuilder::default()
                 .vnodes(vnodes)
-                .replicas(3)
                 .nodes_iter(0..32)
                 .build();
             let control = ring.clone();
@@ -595,10 +577,10 @@ mod consistent_hash_ring_tests {
             ring.remove(&REMOVED);
 
             for x in 0..64 {
-                let ctl: Vec<_> = control.replicas(x).collect();
+                let ctl: Vec<_> = control.replicas(x).take(3).collect();
                 assert_eq!(*ctl[0], control[x]);
 
-                let real: Vec<_> = ring.replicas(x).collect();
+                let real: Vec<_> = ring.replicas(x).take(3).collect();
                 assert_eq!(*real[0], ring[x]);
 
                 if !ctl.contains(&&REMOVED) {
@@ -615,7 +597,6 @@ mod consistent_hash_ring_tests {
 
             let mut x_ring = RingBuilder::default()
                 .vnodes(vnodes)
-                .replicas(3)
                 .nodes_iter(0..4)
                 .build();
             let mut y_ring = x_ring.clone();
@@ -626,10 +607,10 @@ mod consistent_hash_ring_tests {
             y_ring.insert(Y);
 
             for v in 0..64 {
-                let xs: Vec<_> = x_ring.replicas(v).collect();
+                let xs: Vec<_> = x_ring.replicas(v).take(3).collect();
                 assert_eq!(*xs[0], x_ring[v]);
 
-                let ys: Vec<_> = y_ring.replicas(v).collect();
+                let ys: Vec<_> = y_ring.replicas(v).take(3).collect();
                 assert_eq!(*ys[0], y_ring[v]);
 
                 if !xs.contains(&&X) && !ys.contains(&&Y) {
@@ -657,7 +638,7 @@ mod consistent_hash_ring_tests {
     }
 
     fn bench_replicas32(b: &mut Bencher, replicas: usize) {
-        let mut ring = RingBuilder::default().vnodes(50).replicas(replicas).build();
+        let mut ring = RingBuilder::default().vnodes(50).build();
 
         let buckets: Vec<String> = (0..32)
             .map(|s| format!("shard-{}", s))
@@ -667,7 +648,9 @@ mod consistent_hash_ring_tests {
         let mut i = 0;
         b.iter(|| {
             i += 1;
-            ring.replicas(&buckets[i & 31]).for_each(|_| ());
+            ring.replicas(&buckets[i & 31])
+                .take(replicas)
+                .for_each(|_| ());
         });
     }
 

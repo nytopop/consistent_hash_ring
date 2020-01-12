@@ -1,6 +1,6 @@
 [package]
 name = "consistent_hash_ring"
-version = "0.5.8"
+version = "0.6.0"
 authors = ["nytopop <ericizoita@gmail.com>"]
 edition = "2018"
 license = "MIT"
