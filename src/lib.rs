@@ -510,6 +510,12 @@ impl<'a, T: Hash + Eq + Clone, S: BuildHasher> Iterator for Candidates<'a, T, S>
     }
 }
 
+impl<'a, T: Hash + Eq + Clone, S: BuildHasher> ExactSizeIterator for Candidates<'a, T, S> {
+    fn len(&self) -> usize {
+        self.inner.len() - self.seen.len()
+    }
+}
+
 #[cfg(test)]
 mod consistent_hash_ring_tests {
     extern crate test;
@@ -635,6 +641,13 @@ mod consistent_hash_ring_tests {
         assert_eq!(0, ring.len());
         assert_eq!(0, ring.vnodes());
         assert_eq!(None, ring.weight("localhost"));
+    }
+
+    #[test]
+    fn replicas_are_bounded() {
+        let ring = RingBuilder::default().vnodes(12).nodes_iter(0..46).build();
+        let reps: Vec<_> = ring.replicas("testkey").collect();
+        assert_eq!(reps.len(), ring.len());
     }
 
     fn bench_replicas32(b: &mut Bencher, replicas: usize) {
