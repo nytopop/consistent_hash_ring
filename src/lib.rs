@@ -450,7 +450,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     ///
     /// assert_eq!(None, ring.replicas("key").next());
     /// ```
-    pub fn replicas<'a, K: Hash>(&'a self, key: K) -> Candidates<'a, T, S> {
+    pub fn replicas<K: Hash>(&self, key: K) -> Candidates<'_, T, S> {
         Candidates {
             inner: self,
             seen: Vec::with_capacity(self.len()),
