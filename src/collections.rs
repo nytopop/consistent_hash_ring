@@ -101,7 +101,11 @@ impl<K: Ord, V> Map<K, V> for Vec<(K, V)> {
     /// ```
     fn map_insert(&mut self, key: K, val: V) -> Option<V> {
         match self.binary_search_by_key(&&key, first) {
-            Err(i) => Err(self.insert(i, (key, val))),
+            Err(i) => {
+                self.insert(i, (key, val));
+                Err(())
+            }
+
             Ok(i) => Ok(mem::replace(
                 &mut unsafe { self.get_unchecked_mut(i) }.1,
                 val,
