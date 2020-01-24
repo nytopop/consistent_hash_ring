@@ -130,7 +130,9 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
             .into_iter()
             .map(|n| (n, vnodes))
             .chain(self.weighted_nodes)
-            .for_each(|(n, v)| ring.insert_weight(n, v));
+            .for_each(|(n, v)| {
+                ring.insert_weight(n, v);
+            });
 
         ring
     }
@@ -230,7 +232,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     ///
     /// let mut ring = Ring::default();
     /// assert!(ring.is_empty());
-    /// ring.insert(&());
+    /// assert!(ring.insert(&()));
     /// assert!(!ring.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
@@ -283,17 +285,21 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
 
     /// Insert a node into the ring with the default vnode count.
     ///
+    /// If the provided node is already present in the ring, its vnode count is updated
+    /// and `false` is returned.
+    ///
     /// O(k * v + (v * log k) + log k + n + log n)
     ///
     /// ```
     /// use consistent_hash_ring::*;
     ///
     /// let mut ring = Ring::default();
-    /// ring.insert("hello worldo");
+    /// assert!(ring.insert("hello worldo"));
+    /// assert!(!ring.insert("hello worldo"));
     /// assert_eq!(1, ring.len());
     /// assert_eq!(Some(10), ring.weight("hello worldo"));
     /// ```
-    pub fn insert(&mut self, node: T) {
+    pub fn insert(&mut self, node: T) -> bool {
         self.insert_weight(node, self.n_vnodes)
     }
 
@@ -302,7 +308,8 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// This can be used give some nodes more weight than others - nodes with
     /// more vnodes will be selected for larger proportions of keys.
     ///
-    /// If the provided node is already present in the ring, the count is updated.
+    /// If the provided node is already present in the ring, its vnode count is updated
+    /// and `false` is returned.
     ///
     /// O(k * v + (v * log k) + log k + n + log n)
     ///
@@ -310,13 +317,13 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// use consistent_hash_ring::*;
     ///
     /// let mut ring = Ring::default();
-    /// ring.insert("hello worldo");
-    /// ring.insert_weight("worldo hello", 9);
+    /// assert!(ring.insert("hello worldo"));
+    /// assert!(ring.insert_weight("worldo hello", 9));
     /// assert_eq!(2, ring.len());
     /// assert_eq!(Some(10), ring.weight("hello worldo"));
     /// assert_eq!(Some(9), ring.weight("worldo hello"));
     /// ```
-    pub fn insert_weight(&mut self, node: T, vnodes: usize) {
+    pub fn insert_weight(&mut self, node: T, vnodes: usize) -> bool {
         let node_hash = self.hash(&node);
 
         let mut hash = node_hash;
@@ -335,7 +342,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
             hash = self.hash(hash);
         }
 
-        self.unique.map_insert(node_hash, vnodes);
+        self.unique.map_insert(node_hash, vnodes).is_none()
     }
 
     // Hash the provided key.
@@ -350,6 +357,8 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// Any keys that were mapped to this node will be uniformly distributed
     /// amongst nearby nodes.
     ///
+    /// Returns `true` if the node existed in the ring and was removed.
+    ///
     /// O(k + n + log n)
     ///
     /// ```
@@ -360,17 +369,18 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     ///     .build();
     /// assert_eq!(12, ring.len());
     /// assert_eq!(Some(10), ring.weight(&3));
-    /// ring.remove(&3);
+    /// assert!(ring.remove(&3));
+    /// assert!(!ring.remove(&3));
     /// assert_eq!(11, ring.len());
     /// assert_eq!(None, ring.weight(&3));
     /// ```
-    pub fn remove<Q: ?Sized>(&mut self, node: &Q)
+    pub fn remove<Q: ?Sized>(&mut self, node: &Q) -> bool
     where
         T: Borrow<Q>,
         Q: Hash + Eq,
     {
         self.vnodes.retain(|(_, (_node, _))| node != _node.borrow());
-        self.unique.map_remove(&self.hash(node));
+        self.unique.map_remove(&self.hash(node)).is_some()
     }
 
     /// Returns a reference to the first node responsible for the provided key.
@@ -389,7 +399,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     ///     .build();
     /// assert_eq!(None, ring.try_get("none"));
     ///
-    /// ring.insert("hello worldo");
+    /// assert!(ring.insert("hello worldo"));
     /// assert_eq!(Some(&"hello worldo"), ring.try_get(42));
     /// ```
     pub fn try_get<K: Hash>(&self, key: K) -> Option<&T> {
@@ -536,8 +546,8 @@ mod consistent_hash_ring_tests {
                 .build();
 
             let x = ring["hello_worldo"];
-            ring.remove(&x);
-            ring.insert(x);
+            assert!(ring.remove(&x));
+            assert!(ring.insert(x));
             let y = ring["hello_worldo"];
 
             assert_eq!(x, y);
@@ -580,7 +590,7 @@ mod consistent_hash_ring_tests {
             let control = ring.clone();
 
             const REMOVED: usize = 2;
-            ring.remove(&REMOVED);
+            assert!(ring.remove(&REMOVED));
 
             for x in 0..64 {
                 let ctl: Vec<_> = control.replicas(x).take(3).collect();
@@ -609,8 +619,8 @@ mod consistent_hash_ring_tests {
 
             const X: usize = 42;
             const Y: usize = 24;
-            x_ring.insert(X);
-            y_ring.insert(Y);
+            assert!(x_ring.insert(X));
+            assert!(y_ring.insert(Y));
 
             for v in 0..64 {
                 let xs: Vec<_> = x_ring.replicas(v).take(3).collect();
@@ -637,7 +647,7 @@ mod consistent_hash_ring_tests {
         assert_eq!(10, ring.vnodes());
         assert_eq!(Some(10), ring.weight("localhost"));
 
-        ring.remove("localhost");
+        assert!(ring.remove("localhost"));
         assert_eq!(0, ring.len());
         assert_eq!(0, ring.vnodes());
         assert_eq!(None, ring.weight("localhost"));
@@ -655,7 +665,9 @@ mod consistent_hash_ring_tests {
 
         let buckets: Vec<String> = (0..32)
             .map(|s| format!("shard-{}", s))
-            .inspect(|b| ring.insert(b.clone()))
+            .inspect(|b| {
+                ring.insert(b.clone());
+            })
             .collect();
 
         let mut i = 0;
@@ -692,7 +704,9 @@ mod consistent_hash_ring_tests {
 
         let buckets: Vec<String> = (0..shards)
             .map(|s| format!("shard-{}", s))
-            .inspect(|b| ring.insert(b.clone()))
+            .inspect(|b| {
+                ring.insert(b.clone());
+            })
             .collect();
 
         let mut i = 0;
