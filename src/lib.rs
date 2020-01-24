@@ -280,7 +280,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
         T: Borrow<Q>,
         Q: Hash + Eq,
     {
-        self.unique.map_lookup(&self.hash(node)).map(|w| *w)
+        self.unique.map_lookup(&self.hash(node)).copied()
     }
 
     /// Insert a node into the ring with the default vnode count.
