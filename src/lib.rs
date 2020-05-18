@@ -29,6 +29,7 @@ use std::{
     borrow::Borrow,
     cmp,
     hash::{BuildHasher, Hash, Hasher},
+    iter::FromIterator,
     ops::Index,
 };
 
@@ -198,11 +199,33 @@ impl<T: Hash + Eq + Clone> Default for Ring<T> {
     }
 }
 
+impl<T: Hash + Eq + Clone> FromIterator<T> for Ring<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        RingBuilder::default().nodes_iter(iter.into_iter()).build()
+    }
+}
+
 impl<K: Hash, T: Hash + Eq + Clone, S: BuildHasher> Index<K> for Ring<T, S> {
     type Output = T;
 
     fn index(&self, index: K) -> &Self::Output {
         self.get(index)
+    }
+}
+
+impl<T: Hash + Eq + Clone, S: BuildHasher> Extend<T> for Ring<T, S> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        let iter = iter.into_iter();
+
+        let (min, max) = iter.size_hint();
+        let n = max.unwrap_or(min);
+
+        self.vnodes.reserve(n * self.n_vnodes);
+        self.unique.reserve(n);
+
+        for node in iter {
+            self.insert(node);
+        }
     }
 }
 
@@ -381,6 +404,14 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     {
         self.vnodes.retain(|(_, (_node, _))| node != _node.borrow());
         self.unique.map_remove(&self.hash(node)).is_some()
+    }
+
+    /// Remove all nodes from the ring.
+    ///
+    /// O(1)
+    pub fn clear(&mut self) {
+        self.vnodes.clear();
+        self.unique.clear();
     }
 
     /// Returns a reference to the first node responsible for the provided key.
