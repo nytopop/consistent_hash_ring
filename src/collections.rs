@@ -17,7 +17,6 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
-
 use std::mem;
 
 pub trait Set<T> {
@@ -31,20 +30,6 @@ pub trait Set<T> {
 
 impl<T: Ord> Set<T> for Vec<T> {
     /// O(n + log n)
-    ///
-    /// ```
-    /// use consistent_hash_ring::collections::Set;
-    ///
-    /// let mut set = Vec::new();
-    ///
-    /// assert!(set.set_insert(0));
-    /// assert!(!set.set_insert(0));
-    /// assert!(set.set_insert(5));
-    /// assert!(!set.set_insert(5));
-    /// assert!(set.set_insert(3));
-    /// assert!(!set.set_insert(3));
-    /// assert_eq!(vec![0, 3, 5], set);
-    /// ```
     fn set_insert(&mut self, val: T) -> bool {
         self.binary_search(&val)
             .map_err(|i| self.insert(i, val))
@@ -77,28 +62,17 @@ pub trait Map<K, V> {
 }
 
 #[inline]
-pub(crate) fn first<L, R>(tup: &(L, R)) -> &L {
+pub fn first<L, R>(tup: &(L, R)) -> &L {
     &tup.0
 }
 
 #[inline]
-pub(crate) fn second<L, R>(tup: &(L, R)) -> &R {
+pub fn second<L, R>(tup: &(L, R)) -> &R {
     &tup.1
 }
 
 impl<K: Ord, V> Map<K, V> for Vec<(K, V)> {
     /// O(n + log n)
-    ///
-    /// ```
-    /// use consistent_hash_ring::collections::Map;
-    ///
-    /// let mut map = (0..2).map(|x| (x, x)).collect::<Vec<_>>();
-    ///
-    /// assert_eq!(None, map.map_insert(2, 42));
-    /// assert_eq!(vec![(0, 0), (1, 1), (2, 42)], map);
-    /// assert_eq!(Some(42), map.map_insert(2, 24));
-    /// assert_eq!(vec![(0, 0), (1, 1), (2, 24)], map);
-    /// ```
     fn map_insert(&mut self, key: K, val: V) -> Option<V> {
         match self.binary_search_by_key(&&key, first) {
             Err(i) => {
@@ -115,16 +89,6 @@ impl<K: Ord, V> Map<K, V> for Vec<(K, V)> {
     }
 
     /// O(n + log n)
-    ///
-    /// ```
-    /// use consistent_hash_ring::collections::Map;
-    ///
-    /// let mut map = (0..2).map(|x| (x, x)).collect::<Vec<_>>();
-    ///
-    /// assert_eq!(None, map.map_remove(&4));
-    /// assert_eq!(Some((1, 1)), map.map_remove(&1));
-    /// assert_eq!(vec![(0, 0)], map);
-    /// ```
     fn map_remove(&mut self, key: &K) -> Option<(K, V)> {
         self.binary_search_by_key(&key, first)
             .map(|i| self.remove(i))
@@ -132,15 +96,6 @@ impl<K: Ord, V> Map<K, V> for Vec<(K, V)> {
     }
 
     /// O(log n)
-    ///
-    /// ```
-    /// use consistent_hash_ring::collections::Map;
-    ///
-    /// let mut map = (0..2).map(|x| (x, x)).collect::<Vec<_>>();
-    ///
-    /// assert_eq!(Some(&1), map.map_lookup(&1));
-    /// assert_eq!(None, map.map_lookup(&3));
-    /// ```
     fn map_lookup(&self, key: &K) -> Option<&V> {
         self.binary_search_by_key(&key, first)
             .map(|i| unsafe { self.get_unchecked(i) })
@@ -149,23 +104,6 @@ impl<K: Ord, V> Map<K, V> for Vec<(K, V)> {
     }
 
     /// O(log n)
-    ///
-    /// ```
-    /// use consistent_hash_ring::collections::Map;
-    ///
-    /// let mut map = Vec::default();
-    ///
-    /// assert_eq!(None, map.find_gte(&0));
-    /// assert_eq!(None, map.map_insert(1, 2));
-    /// assert_eq!(None, map.map_insert(2, 3));
-    /// assert_eq!(None, map.map_insert(3, 4));
-    /// assert_eq!(vec![(1, 2), (2, 3), (3, 4)], map);
-    /// assert_eq!(Some(&2), map.find_gte(&0));
-    /// assert_eq!(Some(&2), map.find_gte(&1));
-    /// assert_eq!(Some(&3), map.find_gte(&2));
-    /// assert_eq!(Some(&4), map.find_gte(&3));
-    /// assert_eq!(Some(&2), map.find_gte(&4));
-    /// ```
     fn find_gte(&self, key: &K) -> Option<&V> {
         let checked = |i| match self.len() {
             n if n == 0 => None,
@@ -181,7 +119,7 @@ impl<K: Ord, V> Map<K, V> for Vec<(K, V)> {
 }
 
 /// An iterator that can have additional elements prepended to it.
-pub(crate) struct Prependable<I, T> {
+pub struct Prependable<I, T> {
     inner: I,
     pre: Vec<T>,
 }
@@ -195,11 +133,73 @@ impl<I: Iterator<Item = T>, T> Iterator for Prependable<I, T> {
 }
 
 impl<I: Iterator<Item = T>, T> Prependable<I, T> {
-    pub(crate) fn new(inner: I) -> Self {
+    pub fn new(inner: I) -> Self {
         Self { inner, pre: vec![] }
     }
 
-    pub(crate) fn push_front(&mut self, elt: T) {
+    pub fn push_front(&mut self, elt: T) {
         self.pre.push(elt);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vec_set_insert() {
+        let mut set = Vec::new();
+
+        assert!(set.set_insert(0));
+        assert!(!set.set_insert(0));
+        assert!(set.set_insert(5));
+        assert!(!set.set_insert(5));
+        assert!(set.set_insert(3));
+        assert!(!set.set_insert(3));
+        assert_eq!(vec![0, 3, 5], set);
+    }
+
+    #[test]
+    fn vec_map_insert() {
+        let mut map = (0..2).map(|x| (x, x)).collect::<Vec<_>>();
+
+        assert_eq!(None, map.map_insert(2, 42));
+        assert_eq!(vec![(0, 0), (1, 1), (2, 42)], map);
+        assert_eq!(Some(42), map.map_insert(2, 24));
+        assert_eq!(vec![(0, 0), (1, 1), (2, 24)], map);
+    }
+
+    #[test]
+    fn vec_map_remove() {
+        let mut map = (0..2).map(|x| (x, x)).collect::<Vec<_>>();
+
+        assert_eq!(None, map.map_remove(&4));
+        assert_eq!(Some((1, 1)), map.map_remove(&1));
+        assert_eq!(vec![(0, 0)], map);
+    }
+
+    #[test]
+    fn vec_map_lookup() {
+        let map = (0..2).map(|x| (x, x)).collect::<Vec<_>>();
+
+        assert_eq!(Some(&1), map.map_lookup(&1));
+        assert_eq!(None, map.map_lookup(&3));
+    }
+
+    #[test]
+    fn vec_map_find_gte() {
+        let mut map = Vec::default();
+
+        assert_eq!(None, map.find_gte(&0));
+        assert_eq!(None, map.map_insert(1, 2));
+        assert_eq!(None, map.map_insert(2, 3));
+        assert_eq!(None, map.map_insert(3, 4));
+        assert_eq!(vec![(1, 2), (2, 3), (3, 4)], map);
+
+        assert_eq!(Some(&2), map.find_gte(&0));
+        assert_eq!(Some(&2), map.find_gte(&1));
+        assert_eq!(Some(&3), map.find_gte(&2));
+        assert_eq!(Some(&4), map.find_gte(&3));
+        assert_eq!(Some(&2), map.find_gte(&4));
     }
 }
