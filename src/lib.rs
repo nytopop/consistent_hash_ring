@@ -236,9 +236,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// ```
     /// use consistent_hash_ring::*;
     ///
-    /// let ring = RingBuilder::default()
-    ///     .nodes_iter(0..32)
-    ///     .build();
+    /// let ring = RingBuilder::default().nodes_iter(0..32).build();
     /// assert_eq!(32, ring.len());
     /// ```
     pub fn len(&self) -> usize {
@@ -268,10 +266,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// ```
     /// use consistent_hash_ring::*;
     ///
-    /// let ring = RingBuilder::default()
-    ///     .vnodes(4)
-    ///     .nodes_iter(0..12)
-    ///     .build();
+    /// let ring = RingBuilder::default().vnodes(4).nodes_iter(0..12).build();
     /// assert_eq!(48, ring.vnodes());
     /// assert_eq!(12, ring.len());
     /// ```
@@ -386,9 +381,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// ```
     /// use consistent_hash_ring::*;
     ///
-    /// let mut ring = RingBuilder::default()
-    ///     .nodes_iter(0..12)
-    ///     .build();
+    /// let mut ring = RingBuilder::default().nodes_iter(0..12).build();
     /// assert_eq!(12, ring.len());
     /// assert_eq!(Some(10), ring.weight(&3));
     /// assert!(ring.remove(&3));
@@ -424,9 +417,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// ```
     /// use consistent_hash_ring::*;
     ///
-    /// let mut ring = RingBuilder::default()
-    ///     .vnodes(12)
-    ///     .build();
+    /// let mut ring = RingBuilder::default().vnodes(12).build();
     /// assert_eq!(None, ring.try_get("none"));
     ///
     /// assert!(ring.insert("hello worldo"));
@@ -447,10 +438,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// ```
     /// use consistent_hash_ring::*;
     ///
-    /// let mut ring = RingBuilder::default()
-    ///     .vnodes(12)
-    ///     .nodes_iter(0..1)
-    ///     .build();
+    /// let mut ring = RingBuilder::default().vnodes(12).nodes_iter(0..1).build();
     ///
     /// assert_eq!(&0, ring.get("by"));
     /// ```
@@ -467,9 +455,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     /// ```
     /// use consistent_hash_ring::*;
     ///
-    /// let ring = RingBuilder::default()
-    ///     .nodes_iter(0..12)
-    ///     .build();
+    /// let ring = RingBuilder::default().nodes_iter(0..12).build();
     ///
     /// let expect = vec![&10, &2, &8];
     ///

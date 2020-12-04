@@ -92,7 +92,7 @@ impl<K: Ord, V> Map<K, V> for Vec<(K, V)> {
     /// ```
     /// use consistent_hash_ring::collections::Map;
     ///
-    /// let mut map = (0..2).map(|x|(x,x)).collect::<Vec<_>>();
+    /// let mut map = (0..2).map(|x| (x, x)).collect::<Vec<_>>();
     ///
     /// assert_eq!(None, map.map_insert(2, 42));
     /// assert_eq!(vec![(0, 0), (1, 1), (2, 42)], map);
@@ -119,7 +119,7 @@ impl<K: Ord, V> Map<K, V> for Vec<(K, V)> {
     /// ```
     /// use consistent_hash_ring::collections::Map;
     ///
-    /// let mut map = (0..2).map(|x|(x,x)).collect::<Vec<_>>();
+    /// let mut map = (0..2).map(|x| (x, x)).collect::<Vec<_>>();
     ///
     /// assert_eq!(None, map.map_remove(&4));
     /// assert_eq!(Some((1, 1)), map.map_remove(&1));
@@ -136,7 +136,7 @@ impl<K: Ord, V> Map<K, V> for Vec<(K, V)> {
     /// ```
     /// use consistent_hash_ring::collections::Map;
     ///
-    /// let mut map = (0..2).map(|x|(x,x)).collect::<Vec<_>>();
+    /// let mut map = (0..2).map(|x| (x, x)).collect::<Vec<_>>();
     ///
     /// assert_eq!(Some(&1), map.map_lookup(&1));
     /// assert_eq!(None, map.map_lookup(&3));
