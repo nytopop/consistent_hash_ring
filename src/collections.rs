@@ -179,3 +179,27 @@ impl<K: Ord, V> Map<K, V> for Vec<(K, V)> {
             .map(second)
     }
 }
+
+/// An iterator that can have additional elements prepended to it.
+pub(crate) struct Prependable<I, T> {
+    inner: I,
+    pre: Vec<T>,
+}
+
+impl<I: Iterator<Item = T>, T> Iterator for Prependable<I, T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.pre.pop().or_else(|| self.inner.next())
+    }
+}
+
+impl<I: Iterator<Item = T>, T> Prependable<I, T> {
+    pub(crate) fn new(inner: I) -> Self {
+        Self { inner, pre: vec![] }
+    }
+
+    pub(crate) fn push_front(&mut self, elt: T) {
+        self.pre.push(elt);
+    }
+}

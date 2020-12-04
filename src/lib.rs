@@ -21,24 +21,20 @@
 extern crate fnv;
 
 pub mod collections;
-use collections::{first, Map, Set};
+use collections::{first, Map, Prependable, Set};
 
 use fnv::FnvBuildHasher;
 use std::{
     borrow::Borrow,
     cmp,
     hash::{BuildHasher, Hash, Hasher},
-    iter::FromIterator,
-    ops::Index,
+    iter::{self, FromIterator},
+    ops::{Index, RangeInclusive},
 };
 
 /// A builder for `Ring`.
 #[derive(Clone)]
-pub struct RingBuilder<T, S = FnvBuildHasher>
-where
-    T: Hash + Eq + Clone,
-    S: BuildHasher,
-{
+pub struct RingBuilder<T, S = FnvBuildHasher> {
     hasher: S,
     vnodes: usize,
     nodes: Vec<T>,
@@ -173,7 +169,7 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
 /// * v = vnodes per node
 /// * r = replica count
 #[derive(Clone)]
-pub struct Ring<T: Hash + Eq + Clone, S = FnvBuildHasher> {
+pub struct Ring<T, S = FnvBuildHasher> {
     n_vnodes: usize, // # of vnodes for each node (default)
     hasher: S,       // selected build hasher
 
@@ -483,12 +479,51 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> Ring<T, S> {
     unsafe fn get_node_ref(&self, vnode_idx: usize) -> &T {
         &(self.vnodes.get_unchecked(vnode_idx).1).0
     }
+
+    /// Returns an iterator over all available hash ranges in sequential order.
+    pub fn resident_ranges(&self) -> impl Iterator<Item = Resident<'_, T>> + '_ {
+        let mut first = self.vnodes.first().map(|(_, (t, _))| t);
+        let mut vnodes = self.vnodes.iter();
+        let mut s = 0;
+
+        let mut raw = iter::from_fn(move || match vnodes.next() {
+            Some((h, (node, _))) => {
+                let next = Resident { keys: s..=*h, node };
+                s = h.overflowing_add(1).0;
+
+                Some(next)
+            }
+
+            None => Some(Resident {
+                keys: s..=u64::MAX,
+                node: first.take()?,
+            }),
+        })
+        .peekable();
+
+        iter::from_fn(move || {
+            let mut elt = raw.next()?;
+
+            while let Some(suc) = raw.peek() {
+                if suc.node != elt.node {
+                    break;
+                }
+
+                let s = *elt.keys.start();
+                let e = *raw.next().unwrap().keys.end();
+
+                elt = Resident { keys: s..=e, ..elt };
+            }
+
+            Some(elt)
+        })
+    }
 }
 
 /// An iterator over replication candidates.
 ///
 /// Constructed by `Ring::replicas`.
-pub struct Candidates<'a, T: Hash + Eq + Clone, S = FnvBuildHasher> {
+pub struct Candidates<'a, T, S = FnvBuildHasher> {
     inner: &'a Ring<T, S>, // the inner ring
     seen: Vec<u64>,        // hashes of nodes we've used
     hash: u64,             // recursive key hash
@@ -539,5 +574,119 @@ impl<'a, T: Hash + Eq + Clone, S: BuildHasher> Iterator for Candidates<'a, T, S>
 impl<'a, T: Hash + Eq + Clone, S: BuildHasher> ExactSizeIterator for Candidates<'a, T, S> {
     fn len(&self) -> usize {
         self.inner.len() - self.seen.len()
+    }
+}
+
+/// A hash range that maps to some node.
+#[derive(Clone, Debug)]
+pub struct Resident<'a, T> {
+    keys: RangeInclusive<u64>,
+    node: &'a T,
+}
+
+impl<'a, T> Resident<'a, T> {
+    /// The hash range.
+    pub fn keys(&self) -> &RangeInclusive<u64> {
+        &self.keys
+    }
+
+    /// The node this hash range maps to.
+    pub fn node(&self) -> &'a T {
+        self.node
+    }
+}
+
+/// Returns an iterator over any hash ranges in `src` that map to a different node in `dst`.
+///
+/// ```
+/// use consistent_hash_ring::*;
+///
+/// let src = RingBuilder::default()
+///     .nodes_iter(vec!["foo", "bar"])
+///     .vnodes(1)
+///     .build();
+///
+/// let dst = RingBuilder::default()
+///     .nodes_iter(vec!["foo", "bar", "Baz"])
+///     .vnodes(1)
+///     .build();
+///
+/// let m = migrated_ranges(&src, &dst).next().unwrap();
+///
+/// // keys whose hashes fall in this range map to foo in src, and Baz in dst.
+/// assert_eq!(*m.keys(), 11131327745321301792..=13944671288569533511);
+/// assert_eq!(*m.src(), "foo");
+/// assert_eq!(*m.dst(), "Baz");
+/// ```
+pub fn migrated_ranges<'a, T: Hash + Eq + Clone, S: BuildHasher>(
+    src: &'a Ring<T, S>,
+    dst: &'a Ring<T, S>,
+) -> impl Iterator<Item = Migrated<'a, T>> + 'a {
+    let mut dst = Prependable::new(dst.resident_ranges());
+
+    src.resident_ranges().flat_map(move |src_elt| {
+        let mut out = vec![];
+        let mut s = *src_elt.keys.start();
+
+        while let Some(dst_elt) = dst.next() {
+            if src_elt.keys.end() < dst_elt.keys.end() {
+                dst.push_front(Resident {
+                    keys: src_elt.keys.end().overflowing_add(1).0..=*dst_elt.keys.end(),
+                    node: dst_elt.node,
+                });
+
+                if src_elt.node != dst_elt.node {
+                    out.push(Migrated {
+                        keys: s..=*src_elt.keys.end(),
+                        src: src_elt.node,
+                        dst: dst_elt.node,
+                    });
+                }
+
+                break;
+            }
+
+            if src_elt.node != dst_elt.node {
+                out.push(Migrated {
+                    keys: s..=*dst_elt.keys.end(),
+                    src: src_elt.node,
+                    dst: dst_elt.node,
+                });
+            }
+
+            if src_elt.keys.end() > dst_elt.keys.end() {
+                s = dst_elt.keys.end().overflowing_add(1).0;
+                continue;
+            }
+
+            break;
+        }
+
+        out
+    })
+}
+
+/// A hash range that has been migrated to another node.
+#[derive(Clone, Debug)]
+pub struct Migrated<'a, T> {
+    keys: RangeInclusive<u64>,
+    src: &'a T,
+    dst: &'a T,
+}
+
+impl<'a, T> Migrated<'a, T> {
+    /// The hash range that was migrated.
+    pub fn keys(&self) -> &RangeInclusive<u64> {
+        &self.keys
+    }
+
+    /// The source node this hash range maps to.
+    pub fn src(&self) -> &'a T {
+        self.src
+    }
+
+    /// The destination node this hash range maps to.
+    pub fn dst(&self) -> &'a T {
+        self.dst
     }
 }
