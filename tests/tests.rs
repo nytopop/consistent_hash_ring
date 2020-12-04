@@ -28,11 +28,11 @@ fn is_consistent() {
 
         let ring1 = RingBuilder::default()
             .vnodes(vnodes)
-            .nodes_iter(vec![0, 1, 2].into_iter())
+            .nodes_iter(vec![0, 1, 2])
             .build();
         let ring2 = RingBuilder::default()
             .vnodes(vnodes)
-            .nodes_iter(vec![1, 2, 0].into_iter())
+            .nodes_iter(vec![1, 2, 0])
             .build();
 
         (0..32).for_each(|i| assert_eq!(ring1[i], ring2[i]));

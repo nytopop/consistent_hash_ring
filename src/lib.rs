@@ -109,9 +109,9 @@ impl<T: Hash + Eq + Clone, S: BuildHasher> RingBuilder<T, S> {
     /// Ensure that the built `Ring` contains all nodes in the provided iterator.
     pub fn nodes_iter<I>(mut self, nodes: I) -> Self
     where
-        I: Iterator<Item = T>,
+        I: IntoIterator<Item = T>,
     {
-        nodes.for_each(|node| self.nodes.push(node));
+        self.nodes.extend(nodes);
         self
     }
 
@@ -200,7 +200,7 @@ impl<T: Hash + Eq + Clone> Default for Ring<T> {
 
 impl<T: Hash + Eq + Clone> FromIterator<T> for Ring<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        RingBuilder::default().nodes_iter(iter.into_iter()).build()
+        RingBuilder::default().nodes_iter(iter).build()
     }
 }
 
